@@ -31,3 +31,6 @@ Old downloads cached before the fix (e.g. 608x1080) must be deleted to be re-fet
   at 1080x1920 in verify_resolution.py) tries 3 random sticky ports.
 - Every failed attempt is logged: `journalctl -u storystack-web | grep download-v3`.
 - Re-running a build reuses already-downloaded clips, so it only re-fetches the skipped ones.
+- Verified on the VPS (2026-09-26): the 3 clips skipped by the previous build (-8nckzpnhXc,
+  _Z9kW2atY1E, 92-HqHRTXOo) all re-downloaded at 1080x1920 with the patch, on the normal
+  path (no [download-v3] fallback lines were logged).
