@@ -34,6 +34,10 @@ url = sys.argv[1]
 proxy = get_proxy()
 if not proxy:
     sys.exit(f"no 'proxy' setting found in {DB} -- YouTube will bot-block this IP")
+# Media URLs are locked to the IP that extracted them (direct download -> 403), so
+# extraction and download must share one exit IP: use a DataImpulse sticky port.
+if os.environ.get("PP"):
+    proxy = proxy.rsplit(":", 1)[0] + ":" + os.environ["PP"]
 print("proxy:", proxy.split("@")[-1])  # host:port only, no credentials
 out = tempfile.mkdtemp(prefix="ssverify-")
 opts = {
@@ -55,10 +59,6 @@ with yt_dlp.YoutubeDL(opts) as ydl:
             print(f"  offered {f['format_id']:>8} {f.get('width')}x{f.get('height')} "
                   f"{f.get('vcodec')} {f.get('protocol')}")
     print("selected:", info["format_id"], "-", info.get("format"))
-# Proxy is only needed for extraction (youtube.com). The DataImpulse gateway
-# times out on googlevideo media hosts, but the media URLs work direct from the VPS.
-direct = {k: v for k, v in opts.items() if k != "proxy"}
-with yt_dlp.YoutubeDL(direct) as ydl:
     info = ydl.process_ie_result(info, download=True)
     path = info["requested_downloads"][0]["filepath"]
 s = json.loads(subprocess.check_output(
