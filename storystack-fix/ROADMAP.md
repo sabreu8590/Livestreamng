@@ -12,8 +12,9 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - DONE Skip reasons saved per clip (the dashboard display still needs checking)
 
 ## Next
-- NEXT Put the StoryStack code on GitHub (deploy key), so Steven, Claude and the dev team all work on the same code
-- NEXT Pre-download page: "download all / download matching clips" plus an overnight queue, 3-4 downloads at once
+- NEXT Put the StoryStack code on GitHub: push_code_to_github.sh is READY (scans for secrets first)
+- READY Overnight pre-downloader (prefetch.py + install_prefetch.sh): parallel, a sticky IP per worker, highest views first,
+  nightly GB budget, disk guard, status file. Dashboard page for it: PLANNED once the code is on GitHub
 
 ## Builds and reliability
 - PLANNED Skipped clip: retry it again at the end of the download stage; if it still fails, swap in
@@ -29,6 +30,8 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - PLANNED View filters: minimum and maximum views (e.g. over 1M, 1.5M, 2M)
 - PLANNED Mass-select: "select everything that matches the current filters"
 - PLANNED Favourites / pins: hand-picked clips placed first (Top 10 / Top 25), then the rest randomised
+- READY Ordering logic in pacing.py (tested): pinned first, strong opener, hits spread evenly, no long/similar
+  back to back, big closer; pick_livestream() with a no-recent-repeats rule. Needs wiring into the UI.
 - PLANNED Randomiser with pacing: a strong opener, a big hit (e.g. 10M+) every N clips, never two long
   clips or similar titles back to back, a strong closer. recipes.spread_order(anchor_every=5) already exists, so build on it
 - PLANNED Livestream recipe: 250 random clips above X views; don't repeat clips used in recent streams
@@ -41,6 +44,7 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - IDEA Per-channel download budget / DataImpulse cost tracker (MB used per build)
 
 ## Access and hosting
+- READY setup_domain.sh (Caddy, HTTPS, noindex). Needs the DNS A record first.
 - PLANNED Own subdomain with HTTPS (e.g. storystack.plotpointedashboard.com), login required,
   noindex plus robots.txt so it never shows up on Google
 - IDEA Link it from the PlotPointe dashboard, or have the dev team build it in
@@ -49,3 +53,10 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 ## Questions to check
 - Channel shows 1,659 videos but the library has fewer. Check the next sync and whether long videos,
   private/scheduled or members-only videos account for the difference.
+
+## Ideas from Claude
+- IDEA Saved presets: "Monthly Top 25", "Livestream 2M+ x250", one click each
+- IDEA "Used in" history per clip, so livestreams and monthlies avoid recent repeats automatically
+- IDEA Storage and cost panel: GB cached, GB free, DataImpulse spend this month
+- IDEA Chapters already exist (the Chapters button); add clickable chapter text for the YouTube description
+- IDEA Auto-pick "your favourites that underperformed": high watch-time but lower views (needs YouTube Analytics access)
