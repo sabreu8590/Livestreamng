@@ -22,3 +22,12 @@ Old downloads cached before the fix (e.g. 608x1080) must be deleted to be re-fet
 - `selector_test.py`      offline check of format selection
 - `mac_download.sh`       home-IP fallback (no proxy / PO token needed)
 - `format_string.py`      reference format options
+
+## Clip skips (download_backup_patch.py)
+- Likely cause: some clips resolve to HLS/m3u8 formats; the DataImpulse proxy breaks those
+  (TLS handshake failures on manifest.googlevideo.com seen during testing). The patch forces
+  every yt-dlp call to skip HLS and prefer plain https formats, with network retries.
+- If the normal download still fails, an independent backup downloader (the method verified
+  at 1080x1920 in verify_resolution.py) tries 3 random sticky ports.
+- Every failed attempt is logged: `journalctl -u storystack-web | grep download-v3`.
+- Re-running a build reuses already-downloaded clips, so it only re-fetches the skipped ones.
