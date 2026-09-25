@@ -46,7 +46,7 @@ opts = {
     "proxy": proxy,
     "outtmpl": f"{out}/%(id)s.%(ext)s",
     "js_runtimes": {"deno": {}},
-    "extractor_args": {"youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]}},
+    "extractor_args": {"youtube": {"skip": ["hls"]}, "youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]}},
 }
 with yt_dlp.YoutubeDL(opts) as ydl:
     info = ydl.extract_info(url, download=False)

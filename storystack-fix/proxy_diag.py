@@ -26,8 +26,8 @@ def get_proxy():
 proxy = get_proxy()
 print("proxy:", proxy.split("@")[-1], "| scheme:", proxy.split("://")[0])
 opts = {"proxy": proxy, "format": "bv*+ba/b", "format_sort": ["res:1080", "proto:https"],
-        "js_runtimes": {"deno": {}}, "quiet": True,
-        "extractor_args": {"youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]}}}
+        "js_runtimes": {"deno": {}}, "quiet": True, "legacy_server_connect": True,
+        "extractor_args": {"youtube": {"skip": ["hls"]}, "youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]}}}
 with yt_dlp.YoutubeDL(opts) as ydl:
     info = ydl.extract_info(sys.argv[1], download=False)
 v = next(f for f in info["requested_formats"] if f.get("vcodec") != "none")
