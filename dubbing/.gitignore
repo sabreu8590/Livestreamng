@@ -1,0 +1,6 @@
+work/
+*.mp4
+*.wav
+*.mp3
+*.m4a
+__pycache__/

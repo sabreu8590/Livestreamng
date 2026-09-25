@@ -1,0 +1,9 @@
+anthropic>=0.60
+pydantic>=2
+demucs>=4.0.1
+faster-whisper>=1.1
+soundfile
+numpy
+requests
+jiwer
+# ffmpeg must be on PATH
