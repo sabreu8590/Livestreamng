@@ -10,9 +10,8 @@ try:
     from server import db
 except ImportError:
     import db
-db.init()  # without this the saved proxy is invisible
-
 DB = "/var/lib/storystack/storystack.db"
+db.init(DB)  # without this the saved proxy is invisible
 
 def get_proxy():
     for fn in ("get_setting", "get"):
