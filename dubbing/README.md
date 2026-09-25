@@ -72,7 +72,12 @@ clean narrator audio) should beat the instant clone on similarity; that is the n
 
 Higgsfield `dubbing` (translate + voice + lip-sync, one call): the full 99 s Short **failed**
 after about 16 minutes and was refunded. The cost is 353 credits (about $32, $19.50/min).
-See the summary in the PR or session for the 15 s retry.
+A 15 s clip (0:13–0:28) **succeeded** for 54 credits ($4.91). Results: the decal mouths
+really are redrawn to match the Spanish (checked frame by frame); its own automatic voice clone
+scored 0.87 similarity; the music/SFX bed is kept but about 6 dB quieter. The translation is
+literal and has errors: "Solo me estaba apuntando" (a calque of "targeting me"), "salí
+goteando", and a broken clause ("con los que esperaba a ser mi amigo"). There is no glossary
+control, and Higgsfield has no mode that lip-syncs a video to audio you supply.
 
 ElevenLabs Dubbing Studio: not run yet, because the environment has no `ELEVENLABS_API_KEY`.
 `python dub.py eleven-dub` is ready for it.
