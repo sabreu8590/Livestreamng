@@ -3,6 +3,10 @@
 Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNED / IDEA.
 
 ## Done
+- DONE Code uploaded to GitHub (branch storystack-main, 2026-09-25)
+- ALREADY BUILT IN (Recipes tab): date_from/date_to range, min/max views, avoid-repeats (max_used), random/top-views
+  selection, limit N clips or target hours, 'spread' pacing (anchor_every), saved schedules, trims
+- ALREADY BUILT IN: encoding runs in parallel on every core with the ffmpeg veryfast preset, so downloads are the bottleneck
 - DONE 1080x1920 downloads (sticky DataImpulse port 10000; the format fix)
 - DONE Original-language audio, never YouTube auto-dubs
 - DONE YouTube API key: date, length and views fill in within seconds
@@ -12,7 +16,6 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - DONE Skip reasons saved per clip (the dashboard display still needs checking)
 
 ## Next
-- NEXT Put the StoryStack code on GitHub: push_code_to_github.sh is READY (scans for secrets first)
 - READY Overnight pre-downloader (prefetch.py + install_prefetch.sh): parallel, a sticky IP per worker, highest views first,
   nightly GB budget, disk guard, status file. Dashboard page for it: PLANNED once the code is on GitHub
 
@@ -22,7 +25,9 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - PLANNED Resume a crashed build from where it stopped (finished parts are already kept)
 - PLANNED Live build view: Story 1, 2, 3... with thumbnails and a status per clip
   (queued / downloading / encoding / done / skipped / replaced)
-- PLANNED Encode on all 8 cores (several clips at once) plus a faster ffmpeg preset after a quality check
+- FIX Download retries: providers.friendly_download_error rewords errors ("refused", "blocking"), so the port-rotation
+  retry never triggers. Add those words (the v3 backup still catches them)
+- FIX skipWhy() should also read item.note
 - PLANNED Show skip reasons in the build dialog (verify the app.js patch; pass the reason from the API if it's missing)
 
 ## Selecting clips
