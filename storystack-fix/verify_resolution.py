@@ -55,6 +55,10 @@ with yt_dlp.YoutubeDL(opts) as ydl:
             print(f"  offered {f['format_id']:>8} {f.get('width')}x{f.get('height')} "
                   f"{f.get('vcodec')} {f.get('protocol')}")
     print("selected:", info["format_id"], "-", info.get("format"))
+# Proxy is only needed for extraction (youtube.com). The DataImpulse gateway
+# times out on googlevideo media hosts, but the media URLs work direct from the VPS.
+direct = {k: v for k, v in opts.items() if k != "proxy"}
+with yt_dlp.YoutubeDL(direct) as ydl:
     info = ydl.process_ie_result(info, download=True)
     path = info["requested_downloads"][0]["filepath"]
 s = json.loads(subprocess.check_output(
