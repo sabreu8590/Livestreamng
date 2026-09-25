@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234c8dff'/%3E%3Crect x='8' y='8' width='16' height='4' rx='1.5' fill='white'/%3E%3Crect x='8' y='14' width='16' height='4' rx='1.5' fill='white' opacity='.7'/%3E%3Crect x='8' y='20' width='16' height='4' rx='1.5' fill='white' opacity='.4'/%3E%3C/svg%3E">
+<title>storystack</title>
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0d0f12; --panel:#14181d; --panel2:#191e24; --line:#262c34;
+  --text:#e8eaed; --dim:#8b939e; --dim2:#646c77;
+  --accent:#4c8dff; --accent-dim:#2d5aa8;
+  --good:#3ecf8e; --warn:#f0a93b; --bad:#ff6b6b;
+  --radius:10px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+a{color:var(--accent)}
+
+/* ---------- top bar ---------- */
+.top{display:flex;align-items:center;gap:12px;padding:10px 16px;
+  background:var(--panel);border-bottom:1px solid var(--line);flex-shrink:0}
+.brand{font-weight:700;letter-spacing:-.2px;margin-right:4px}
+.brand span{color:var(--accent)}
+.top select,.top input{background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;padding:7px 10px}
+.top input.search{flex:1;max-width:320px}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  padding:7px 13px;white-space:nowrap}
+.btn:hover{background:#222831;border-color:#39414c}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.btn.primary:hover{background:#3d7bec}
+.btn.primary:disabled{background:#2a3038;border-color:#2a3038;color:var(--dim2);cursor:not-allowed}
+.btn.ghost{background:transparent}
+.btn.sm{padding:4px 9px;font-size:12px}
+.spacer{flex:1}
+.status{font-size:12px;color:var(--dim);white-space:nowrap}
+
+/* ---------- layout ---------- */
+.main{flex:1;display:flex;min-height:0}
+.side{width:196px;flex-shrink:0;background:var(--panel);
+  border-right:1px solid var(--line);padding:14px;overflow-y:auto}
+.side h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;
+  letter-spacing:.7px;color:var(--dim2)}
+.side .group{margin-bottom:20px}
+.side select{width:100%;background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px}
+.chk{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;
+  color:var(--dim);cursor:pointer}
+.chk input{accent-color:var(--accent);width:15px;height:15px}
+.chk:hover{color:var(--text)}
+
+.grid-wrap{flex:1;overflow-y:auto;padding:14px}
+.grid{display:grid;gap:11px;
+  grid-template-columns:repeat(auto-fill,minmax(155px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+  overflow:hidden;cursor:pointer;position:relative;transition:border-color .12s}
+.card:hover{border-color:#3c4553}
+.card.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.card.sel .thumb{filter:brightness(.62)}
+.thumbwrap{position:relative;display:block;line-height:0}
+.thumb{width:100%;aspect-ratio:9/16;background:#05070a;object-fit:cover;display:block}
+.thumb.wide{aspect-ratio:16/9}
+.card .meta{padding:7px 9px 9px}
+.card .t{font-size:12px;line-height:1.35;height:32px;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.card .s{font-size:11px;color:var(--dim2);margin-top:4px;display:flex;
+  justify-content:space-between;gap:6px}
+.pill{position:absolute;border-radius:6px;font-size:11px;font-weight:600;
+  padding:2px 6px;background:rgba(0,0,0,.78);backdrop-filter:blur(3px)}
+.pill.dur{right:6px;top:6px}
+.pill.used{left:6px;top:6px;background:rgba(240,169,59,.9);color:#1a1205}
+.ordnum{position:absolute;left:6px;bottom:6px;width:26px;height:26px;
+  border-radius:50%;background:var(--accent);color:#fff;font-weight:700;
+  font-size:12px;display:grid;place-items:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.totals{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:0 2px 12px;font-size:12.5px;color:var(--dim)}
+.totals b{color:var(--text);font-variant-numeric:tabular-nums}
+.totals .warn{color:var(--warn)}
+.totals .sp{flex:1}
+.empty{color:var(--dim2);text-align:center;padding:60px 20px;font-size:14px}
+
+/* ---------- tray ---------- */
+.tray{width:312px;flex-shrink:0;background:var(--panel);
+  border-left:1px solid var(--line);display:flex;flex-direction:column}
+.tray header{padding:12px 14px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px}
+.tray header b{font-size:13px}
+.tray .sum{font-size:12px;color:var(--dim)}
+.picked{flex:1;overflow-y:auto;padding:8px}
+.row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;
+  background:var(--panel2);margin-bottom:5px;cursor:grab;border:1px solid transparent}
+.row:hover{border-color:var(--line)}
+.row.drag{opacity:.35}
+.row.over{border-color:var(--accent)}
+.row .n{width:22px;height:22px;border-radius:50%;background:var(--accent);
+  color:#fff;font-size:11px;font-weight:700;display:grid;place-items:center;flex-shrink:0}
+.row .nm{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .tr{background:none;border:0;color:var(--dim2);font-size:12px;padding:0 3px}
+.row .tr:hover,.row .tr.on{color:var(--accent)}
+.trimbox{display:flex;gap:6px;align-items:center;padding:6px 8px 8px 38px;
+  margin:-4px 0 6px;font-size:11px;color:var(--dim2)}
+.trimbox input{width:56px;background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:3px 6px;font-size:12px;color:var(--text)}
+.row .rm{background:none;border:0;color:var(--dim2);font-size:17px;line-height:1;padding:0 3px}
+.row .rm:hover{color:var(--bad)}
+.tray footer{padding:12px 14px;border-top:1px solid var(--line)}
+.field{margin-bottom:10px}
+.field label{display:block;font-size:11px;color:var(--dim2);margin-bottom:4px;
+  text-transform:uppercase;letter-spacing:.5px}
+.field input,.field select{width:100%;background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;padding:7px 9px;font-size:13px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.prev{font-size:12px;color:var(--dim);margin:-4px 0 10px}
+.prev b{color:var(--accent)}
+
+/* ---------- modal + builds ---------- */
+.mask{position:fixed;inset:0;background:rgba(0,0,0,.66);display:grid;
+  place-items:center;z-index:50;padding:20px}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  width:100%;max-width:560px;max-height:86vh;overflow-y:auto}
+.modal .mh{padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:10px}
+.modal .mh b{flex:1}
+.modal .mb{padding:18px}
+.bar{height:7px;background:var(--panel2);border-radius:4px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--accent);transition:width .3s}
+.stages{display:flex;gap:6px;margin:14px 0 6px}
+.stage{flex:1;text-align:center;font-size:11px;padding:7px 4px;border-radius:7px;
+  background:var(--panel2);color:var(--dim2)}
+.stage.on{background:var(--accent-dim);color:#fff}
+.stage.done{background:rgba(62,207,142,.16);color:var(--good)}
+.blist{font-size:13px}
+.bitem{display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--line)}
+.bitem:last-child{border:0}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.done{background:var(--good)} .dot.running{background:var(--accent)}
+.dot.failed{background:var(--bad)} .dot.queued{background:var(--dim2)}
+.dot.cancelled{background:var(--warn)}
+.note{font-size:12px;color:var(--dim);margin-top:6px}
+.warnbox{background:rgba(240,169,59,.1);border:1px solid rgba(240,169,59,.3);
+  border-radius:8px;padding:10px;font-size:12px;color:var(--warn);margin-top:12px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);
+  background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+  padding:10px 16px;font-size:13px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+
+/* ---------- views + nav ---------- */
+.view{flex:1;display:flex;min-height:0}
+.view[hidden]{display:none!important}
+.nav{display:flex;gap:2px;background:var(--bg);border:1px solid var(--line);
+  border-radius:9px;padding:2px}
+.navb{background:transparent;border:0;border-radius:7px;padding:5px 12px;
+  font-size:13px;color:var(--dim)}
+.navb:hover{color:var(--text)}
+.navb.on{background:var(--panel2);color:var(--text);font-weight:600}
+
+/* ---------- recipes ---------- */
+.pane{flex:1;display:flex;min-height:0;width:100%}
+.paneside{width:272px;flex-shrink:0;background:var(--panel);
+  border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px}
+.phead{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.phead b{font-size:13px}
+.rlist{flex:1;overflow-y:auto;margin:0 -4px}
+.rcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 11px;margin:0 4px 7px;cursor:pointer}
+.rcard:hover{border-color:#39414c}
+.rcard.on{border-color:var(--accent)}
+.rcard .rn{font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.rcard .rs{font-size:11.5px;color:var(--dim2);margin-top:3px;line-height:1.45}
+.rcard .rs b{color:var(--dim);font-weight:500}
+.hintbox{font-size:11.5px;line-height:1.55;color:var(--dim2);
+  border-top:1px solid var(--line);padding-top:12px;margin:10px 0 0}
+.panemain{flex:1;overflow-y:auto;padding:18px}
+.rsec{max-width:760px;margin-bottom:22px}
+.rsec h3{margin:0 0 3px;font-size:14px}
+.rsec p.sub{margin:0 0 12px;font-size:12px;color:var(--dim2)}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px}
+.chanpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
+  gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:9px;
+  padding:10px;max-height:190px;overflow-y:auto}
+.chanpick label{display:flex;align-items:center;gap:8px;font-size:12.5px;
+  color:var(--dim);cursor:pointer}
+.chanpick label:hover{color:var(--text)}
+.chanpick input{accent-color:var(--accent)}
+.chantot{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.chanchip{font-size:11.5px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:20px;padding:3px 10px;color:var(--dim)}
+.chanchip b{color:var(--text);font-variant-numeric:tabular-nums}
+.chanchip.zero{opacity:.5}
+.dot-sep{height:1px;background:var(--line);margin:20px 0;max-width:760px}
+.preview{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:14px;max-width:760px}
+.pstats{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:12px}
+.pstat .v{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums}
+.pstat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--dim2)}
+.ptable{font-size:12px;max-height:290px;overflow-y:auto;border-top:1px solid var(--line)}
+.prow{display:flex;gap:10px;padding:5px 2px;border-bottom:1px solid var(--line);
+  align-items:center}
+.prow .pi{width:26px;color:var(--dim2);font-variant-numeric:tabular-nums;flex-shrink:0}
+.prow .pt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow .pv{color:var(--dim);font-variant-numeric:tabular-nums;flex-shrink:0}
+.prow.anchor .pv{color:var(--good);font-weight:600}
+.prow.anchor .pt{color:var(--text)}
+.legend{font-size:11.5px;color:var(--dim2);margin-top:9px}
+.legend b{color:var(--good)}
+
+/* ---------- streams ---------- */
+.streamwrap{flex:1;overflow-y:auto;padding:18px;width:100%}
+.pat{background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  padding:6px 10px;font-size:13px;width:190px}
+.scard{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:13px 15px;margin-bottom:9px;display:flex;align-items:center;gap:14px;
+  flex-wrap:wrap}
+.scard .sname{font-weight:600;font-size:14px;min-width:150px}
+.scard .smeta{font-size:11.5px;color:var(--dim2);margin-top:2px}
+.state{font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;
+  text-transform:uppercase;letter-spacing:.5px}
+.state.active{background:rgba(62,207,142,.16);color:var(--good)}
+.state.failed{background:rgba(255,107,107,.16);color:var(--bad)}
+.state.inactive{background:rgba(139,147,158,.14);color:var(--dim)}
+.state.activating{background:rgba(240,169,59,.16);color:var(--warn)}
+.logbox{background:#07090c;border:1px solid var(--line);border-radius:9px;
+  padding:11px;font:11.5px/1.6 ui-monospace,monospace;color:var(--dim);
+  white-space:pre-wrap;max-height:260px;overflow-y:auto;margin-top:10px;width:100%}
+@media (max-width:900px){
+  .pane{flex-direction:column;overflow-y:auto}
+  .paneside{width:100%;border-right:0;border-bottom:1px solid var(--line)}
+  .nav{order:9}
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">story<span>stack</span></div>
+  <select id="chan"></select>
+  <button class="btn sm" id="addChan">+ Channel</button>
+  <button class="btn sm" id="sync">Sync</button>
+  <input class="search" id="q" placeholder="Search titles">
+  <div class="spacer"></div>
+  <div class="status" id="stat"></div>
+  <nav class="nav">
+    <button class="navb on" data-view="Library">Library</button>
+    <button class="navb" data-view="Recipes">Recipes</button>
+    <button class="navb" data-view="Streams">Streams</button>
+  </nav>
+  <button class="btn sm" id="showBuilds">Builds</button>
+  <button class="btn sm ghost" id="showSettings" title="Settings">&#9881;</button>
+</div>
+
+<div class="view" id="viewLibrary">
+<div class="main">
+  <aside class="side">
+    <div class="group">
+      <h4>Month</h4>
+      <select id="month"><option value="">All months</option></select>
+    </div>
+    <div class="group">
+      <h4>Type</h4>
+      <select id="shorts">
+        <option value="only">Shorts only</option>
+        <option value="">All videos</option>
+        <option value="exclude">Long form only</option>
+      </select>
+    </div>
+    <div class="group">
+      <h4>Sort</h4>
+      <select id="sort">
+        <option value="date_desc">Newest first</option>
+        <option value="date_asc">Oldest first</option>
+        <option value="views_desc">Most views</option>
+        <option value="views_asc">Fewest views</option>
+        <option value="duration_asc">Shortest</option>
+        <option value="duration_desc">Longest</option>
+        <option value="title_asc">Title A-Z</option>
+      </select>
+    </div>
+    <div class="group">
+      <h4>Filter</h4>
+      <label class="chk"><input type="checkbox" id="unused"> Never used</label>
+    </div>
+    <div class="group">
+      <h4>Select</h4>
+      <button class="btn sm" id="selAll" style="width:100%;margin-bottom:6px">Add all shown</button>
+      <button class="btn sm ghost" id="clearSel" style="width:100%">Clear</button>
+    </div>
+  </aside>
+
+  <div class="grid-wrap">
+    <div class="totals" id="totals"></div>
+    <div class="grid" id="grid"></div>
+    <div class="empty" id="empty" style="display:none"></div>
+  </div>
+
+  <aside class="tray">
+    <header>
+      <b>Compilation</b>
+      <div class="spacer"></div>
+      <div class="sum" id="sum">nothing picked</div>
+    </header>
+    <div class="picked" id="picked"></div>
+    <footer>
+      <div class="two">
+        <div class="field">
+          <label>Shape</label>
+          <select id="aspect">
+            <option value="9:16">9:16 vertical</option>
+            <option value="16:9">16:9 wide</option>
+            <option value="1:1">1:1 square</option>
+            <option value="4:5">4:5 feed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Fill the sides</label>
+          <select id="fill">
+            <option value="blur">Blurred, no bars</option>
+            <option value="pad">Black bars</option>
+            <option value="crop">Crop to fill</option>
+          </select>
+        </div>
+      </div>
+      <div class="two">
+        <div class="field">
+          <label>Trim off start (s)</label>
+          <input id="trimHead" type="number" min="0" step="0.5" value="0">
+        </div>
+        <div class="field">
+          <label>Trim off end (s)</label>
+          <input id="trimTail" type="number" min="0" step="0.5" value="0">
+        </div>
+      </div>
+      <div class="field">
+        <label>Label on each clip</label>
+        <input id="tpl" value="Story {n}">
+      </div>
+      <div class="prev">First clip reads <b id="tplPrev">Story 1</b></div>
+      <div class="two">
+        <div class="field">
+          <label>Label style</label>
+          <select id="lblStyle">
+            <option value="box">Plate</option>
+            <option value="outline">Outline</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Position</label>
+          <select id="pos">
+            <option value="top">Top</option>
+            <option value="top-left">Top left</option>
+            <option value="top-right">Top right</option>
+            <option value="center">Center</option>
+            <option value="bottom">Bottom</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Seconds on screen</label>
+          <input id="dur" type="number" value="5" min="0" step="0.5">
+        </div>
+        <div class="field">
+          <label>Fade in / out (s)</label>
+          <div style="display:flex;gap:6px">
+            <input id="fadeIn" type="number" min="0" step="0.05" value="0.5">
+            <input id="fadeOut" type="number" min="0" step="0.05" value="0.05">
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Name</label>
+        <input id="bname" placeholder="september-compilation">
+      </div>
+      <button class="btn primary" id="build" style="width:100%" disabled>Build compilation</button>
+    </footer>
+  </aside>
+</div>
+</div>
+
+<div class="view" id="viewRecipes" hidden>
+  <div class="pane">
+    <div class="paneside">
+      <div class="phead">
+        <b>Recipes</b>
+        <button class="btn sm primary" id="newRecipe">New</button>
+      </div>
+      <div id="recipeList" class="rlist"></div>
+      <p class="hintbox">A recipe is a saved rule. It picks the clips and the
+      order on its own, and can run itself every month so a compilation is
+      waiting for you without anyone clicking anything.</p>
+    </div>
+    <div class="panemain" id="recipeEditor"></div>
+  </div>
+</div>
+
+<div class="view" id="viewStreams" hidden>
+  <div class="streamwrap">
+    <div class="phead" style="margin-bottom:14px">
+      <b>Livestreams</b>
+      <div class="spacer"></div>
+      <input id="streamPattern" class="pat" placeholder="stream@*.service">
+      <button class="btn sm" id="savePattern">Save pattern</button>
+      <button class="btn sm" id="refreshStreams">Refresh</button>
+    </div>
+    <div id="streamList"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
