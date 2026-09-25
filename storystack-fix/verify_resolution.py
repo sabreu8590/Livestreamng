@@ -38,7 +38,10 @@ print("proxy:", proxy.split("@")[-1])  # host:port only, no credentials
 out = tempfile.mkdtemp(prefix="ssverify-")
 opts = {
     "format": "bv*+ba/b",
-    "format_sort": ["res:1080"],  # res = short side -> 1080x1920 for Shorts
+    # res = short side -> 1080x1920 for Shorts; prefer direct https (DASH) over HLS
+    "format_sort": ["res:1080", "proto:https"],
+    "legacy_server_connect": True,
+    "retries": 5, "fragment_retries": 10,
     "merge_output_format": "mp4",
     "proxy": proxy,
     "outtmpl": f"{out}/%(id)s.%(ext)s",
@@ -46,9 +49,14 @@ opts = {
     "extractor_args": {"youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]}},
 }
 with yt_dlp.YoutubeDL(opts) as ydl:
-    info = ydl.extract_info(url, download=True)
+    info = ydl.extract_info(url, download=False)
+    for f in info["formats"]:
+        if (f.get("height") or 0) >= 1080 or (f.get("width") or 0) >= 1080:
+            print(f"  offered {f['format_id']:>8} {f.get('width')}x{f.get('height')} "
+                  f"{f.get('vcodec')} {f.get('protocol')}")
+    print("selected:", info["format_id"], "-", info.get("format"))
+    info = ydl.process_ie_result(info, download=True)
     path = info["requested_downloads"][0]["filepath"]
-print("selected:", info["format_id"], "-", info.get("format"))
 s = json.loads(subprocess.check_output(
     ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
      "stream=codec_name,width,height", "-of", "json", path]))["streams"][0]
