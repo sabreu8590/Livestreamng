@@ -1,14 +1,20 @@
 # StoryStack 1080x1920 fix
 
-1. In `server/providers.py`, replace the format string with `ydl_format_opts()` from
-   `format_string.py` (format `bv*+ba/b`, `format_sort=["res:1080"]`, merge to mp4).
-   Remove every `[ext=mp4]` / `[height<=1080]` filter.
-2. `sudo systemctl restart storystack-web`
-3. Verify with a real Short: `cd /opt/storystack && python3 storystack-fix/verify_resolution.py <url>`
-   Expect `ACTUAL 1080x1920 av1` (or `vp9`).
+## Verified result (VPS, 2026-09-25)
+`verify_resolution.py` on https://www.youtube.com/shorts/cRf9ZrV77AQ via DataImpulse
+sticky ports 10000/10001/10002: `selected 399+251-17`, `ACTUAL 1080x1920 av1`, 12.6 MB.
 
-`selector_test.py` runs yt-dlp's real selector on a Short-shaped format list:
-old string -> 608x1080 h264, new -> 1080x1920.
+## Root causes
+1. Format: `[ext=mp4]` capped some Shorts at 608x1080 H.264. Use `res:<short side>` sorting
+   (`server/providers.py` already has `format_sort: res:{max_height()}` with max_height=1080).
+2. Proxy: `gw.dataimpulse.com:823` is the ROTATING port. YouTube media URLs are locked to the
+   IP that extracted them (direct download from the VPS -> 403), and rotating exits break
+   the googlevideo download (TLS handshake failures / timeouts).
+   Fix: use a STICKY port (10000+) so extraction and download share one IP.
 
-Stitching: the files are now AV1/VP9, so the compilation step must re-encode
-(e.g. `-c:v libx264`), not stream-copy with `-c copy`.
+## Files
+- `verify_resolution.py`  download one Short through the saved proxy, ffprobe it (`PP=10000` overrides the port)
+- `proxy_diag.py`         curl youtube.com / googlevideo via proxy vs direct
+- `selector_test.py`      offline check of format selection
+- `mac_download.sh`       home-IP fallback (no proxy / PO token needed)
+- `format_string.py`      reference format options
