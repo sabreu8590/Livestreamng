@@ -142,6 +142,9 @@ def main():
                     st["errors"].append({"id": vid, "title": title, "error": str(exc)[:300]})
                     st["errors"] = st["errors"][-50:]
                     print(f"  FAIL {title[:60]}: {str(exc)[:160]}", flush=True)
+                    if "TRAFFIC_EXHAUSTED" in str(exc) or "407" in str(exc):
+                        stop = "proxy traffic used up or proxy login rejected (HTTP 407)"
+                        queue.clear()
             mins = max((time.time() - t0) / 60, 1e-6)
             finished_n = st["done"] + st["failed"]
             st["rate_per_min"] = finished_n / mins
