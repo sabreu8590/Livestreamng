@@ -1,0 +1,36 @@
+# StoryStack 1080x1920 fix
+
+## Verified result (VPS, 2026-09-25)
+`verify_resolution.py` on https://www.youtube.com/shorts/cRf9ZrV77AQ via DataImpulse
+sticky ports 10000/10001/10002: `selected 399+251-17`, `ACTUAL 1080x1920 av1`, 12.6 MB.
+
+Dashboard confirmed after switching the saved proxy to `:10000`: fresh download
+`/var/lib/storystack/downloads/XLM5Ur7mMMU.mp4` = `h264,1080,1920` (build 5).
+Old downloads cached before the fix (e.g. 608x1080) must be deleted to be re-fetched.
+
+## Root causes
+1. Format: `[ext=mp4]` capped some Shorts at 608x1080 H.264. Use `res:<short side>` sorting
+   (`server/providers.py` already has `format_sort: res:{max_height()}` with max_height=1080).
+2. Proxy: `gw.dataimpulse.com:823` is the ROTATING port. YouTube media URLs are locked to the
+   IP that extracted them (direct download from the VPS -> 403), and rotating exits break
+   the googlevideo download (TLS handshake failures / timeouts).
+   Fix: use a STICKY port (10000+) so extraction and download share one IP.
+
+## Files
+- `verify_resolution.py`  download one Short through the saved proxy, ffprobe it (`PP=10000` overrides the port)
+- `proxy_diag.py`         curl youtube.com / googlevideo via proxy vs direct
+- `selector_test.py`      offline check of format selection
+- `mac_download.sh`       home-IP fallback (no proxy / PO token needed)
+- `format_string.py`      reference format options
+
+## Clip skips (download_backup_patch.py)
+- Likely cause: some clips resolve to HLS/m3u8 formats; the DataImpulse proxy breaks those
+  (TLS handshake failures on manifest.googlevideo.com seen during testing). The patch forces
+  every yt-dlp call to skip HLS and prefer plain https formats, with network retries.
+- If the normal download still fails, an independent backup downloader (the method verified
+  at 1080x1920 in verify_resolution.py) tries 3 random sticky ports.
+- Every failed attempt is logged: `journalctl -u storystack-web | grep download-v3`.
+- Re-running a build reuses already-downloaded clips, so it only re-fetches the skipped ones.
+- Verified on the VPS (2026-09-26): the 3 clips skipped by the previous build (-8nckzpnhXc,
+  _Z9kW2atY1E, 92-HqHRTXOo) all re-downloaded at 1080x1920 with the patch, on the normal
+  path (no [download-v3] fallback lines were logged).

@@ -54,8 +54,8 @@ DEFAULT_CONFIG = {
     },
     "label": {
         "template": "Story {n}",
-        "font": "DejaVu Sans",
-        "font_size_pct": 4.2,
+        "font": "Montserrat",
+        "font_size_pct": 5.4,
         "position": "top",
         "margin_pct": 4.0,
         "duration": 5.0,
@@ -68,10 +68,11 @@ DEFAULT_CONFIG = {
         "shadow": 0.0,
         "box": True,           # the dark plate behind the text
         "box_color": "1A1A1A",
-        "box_opacity": 0.72,
-        "box_radius_pct": 22.0,   # corner radius, percent of the plate height
-        "box_pad_x_em": 0.75,
-        "box_pad_y_em": 0.42,
+        "box_opacity": 0.35,
+        "box_radius_pct": 50.0,   # corner radius, percent of the plate height
+        "box_pad_x_em": 0.55,
+        "box_pad_y_em": 0.28,
+        "text_width_scale": 0.88,
         "bold": True,
         "all_caps": True,
     },
@@ -312,7 +313,7 @@ def estimate_text_width(text, font_size):
 
 
 def rounded_rect_drawing(box_w, box_h, radius):
-    """An ASS \p1 rounded rectangle spanning (0,0) to (box_w, box_h).
+    r"""An ASS \p1 rounded rectangle spanning (0,0) to (box_w, box_h).
 
     Anchored from its own top-left corner rather than centred, so it can be
     placed with \\an7 and land exactly where the arithmetic says.
@@ -322,16 +323,17 @@ def rounded_rect_drawing(box_w, box_h, radius):
     r = max(0.0, min(float(radius), w / 2.0, h / 2.0))
     if r <= 0.5:
         return f"m 0 0 l {w:.0f} 0 l {w:.0f} {h:.0f} l 0 {h:.0f}"
+    k = r * 0.5523  # control-point offset for a true circular quarter arc
     return (
         f"m {r:.0f} 0 "
         f"l {w - r:.0f} 0 "
-        f"b {w:.0f} 0 {w:.0f} 0 {w:.0f} {r:.0f} "
+        f"b {w - r + k:.0f} 0 {w:.0f} {r - k:.0f} {w:.0f} {r:.0f} "
         f"l {w:.0f} {h - r:.0f} "
-        f"b {w:.0f} {h:.0f} {w:.0f} {h:.0f} {w - r:.0f} {h:.0f} "
+        f"b {w:.0f} {h - r + k:.0f} {w - r + k:.0f} {h:.0f} {w - r:.0f} {h:.0f} "
         f"l {r:.0f} {h:.0f} "
-        f"b 0 {h:.0f} 0 {h:.0f} 0 {h - r:.0f} "
+        f"b {r - k:.0f} {h:.0f} 0 {h - r + k:.0f} 0 {h - r:.0f} "
         f"l 0 {r:.0f} "
-        f"b 0 0 0 0 {r:.0f} 0"
+        f"b 0 {r - k:.0f} {r - k:.0f} 0 {r:.0f} 0"
     )
 
 
@@ -377,7 +379,8 @@ def build_ass(text, cfg, out_path):
     if use_box:
         pad_x = float(lab.get("box_pad_x_em", 0.75)) * font_size
         pad_y = float(lab.get("box_pad_y_em", 0.42)) * font_size
-        text_w = estimate_text_width(body_text, font_size)
+        # fonts differ in width; text_width_scale tunes the plate to the font
+        text_w = estimate_text_width(body_text, font_size) * float(lab.get("text_width_scale", 1.0))
         box_w = text_w + 2 * pad_x
         box_h = font_size * 1.18 + 2 * pad_y
         radius = box_h * float(lab.get("box_radius_pct", 22.0)) / 100.0
@@ -707,46 +710,45 @@ def recipe_fingerprint(item, cfg, label_text):
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def render_clip(item, cfg, work_dir):
-    """Normalize + label one clip into an MPEG-TS intermediate. Cached."""
-    src = item["path"]
-    label_text = render_label_text(item, cfg)
-    digest = recipe_fingerprint(item, cfg, label_text)
-    parts_dir = Path(work_dir) / "parts"
-    parts_dir.mkdir(parents=True, exist_ok=True)
-    # MP4 rather than MPEG-TS on purpose: in TS the AAC priming makes the audio
-    # stream start ~21ms before the video, and the concat demuxer offsets each
-    # segment by container duration, turning that into a visible hitch at every
-    # single join. MP4 edit lists carry the priming, so the joins are exact.
-    out = parts_dir / f"{item['index']:04d}_{digest}.mp4"
-    meta_path = out.with_suffix(".json")
+def _trim_window(item, info, fps):
+    """Resolve trims into (trim_start, target_frames, target_duration).
 
-    if out.is_file() and meta_path.is_file() and out.stat().st_size > 1024:
-        try:
-            cached = json.loads(meta_path.read_text(encoding="utf-8"))
-            if cached.get("duration", 0) > 0:
-                cached["cached"] = True
-                return cached
-        except (json.JSONDecodeError, OSError):
-            pass
+    Guarded so a trim longer than the clip cannot produce an empty segment; in
+    that case the trim is dropped and the clip kept whole. Each segment is cut
+    to a whole number of frames and the audio padded to match: otherwise the AAC
+    tail runs a few ms past the last video frame, and the concat demuxer turns
+    every one of those into a visible hitch at the join.
+    """
+    trim_start = max(0.0, float(item.get("trim_start") or 0))
+    trim_end = max(0.0, float(item.get("trim_end") or 0))
+    source_duration = float(info["duration"])
+    usable = source_duration - trim_start - trim_end
+    if source_duration > 0 and usable < 0.30:
+        trim_start, trim_end = 0.0, 0.0
+        usable = source_duration
+    target_frames = max(1, math.floor(usable * fps))
+    return trim_start, trim_end, target_frames, target_frames / float(fps)
 
-    info = probe(src)
-    if not info["has_video"]:
-        raise RuntimeError(f"{src.name} has no video stream")
 
+def _encode(src, info, cfg, out, *, ass_path=None, trim_start=0.0,
+            frames=None, duration=None, video_only=False):
+    """One ffmpeg pass: normalize (and optionally label) a clip into MP4.
+
+    MP4 rather than MPEG-TS on purpose: in TS the AAC priming makes the audio
+    stream start ~21ms before the video, and the concat demuxer offsets each
+    segment by container duration, turning that into a visible hitch at every
+    single join. MP4 edit lists carry the priming, so the joins are exact.
+    """
     vid, aud = cfg["video"], cfg["audio"]
     width, height, fps = int(vid["width"]), int(vid["height"]), int(vid["fps"])
     gop = max(1, fps * 2)
 
-    ass_path = parts_dir / f"{item['index']:04d}_{digest}.ass"
-    build_ass(label_text, cfg, ass_path)
-
     fill = str(vid.get("fill") or "pad").lower()
-    subs = f"subtitles=filename='{filter_path(ass_path)}'"
+    subs = f",subtitles=filename='{filter_path(ass_path)}'" if ass_path else ""
 
     if fill == "crop":
         vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-              f"crop={width}:{height},setsar=1,fps={fps},{subs}")
+              f"crop={width}:{height},setsar=1,fps={fps}{subs}")
         graph = None
     elif fill == "blur":
         # Downscale hard, blur, upscale: the round trip does most of the
@@ -760,30 +762,13 @@ def render_clip(item, cfg, work_dir):
             f"crop={width}:{height},scale=iw/12:-2,gblur=sigma=4,"
             f"scale={width}:{height},eq=brightness=-{darken:.2f}[bgb];"
             f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease[fgs];"
-            f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1,{subs}[v]"
+            f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1{subs}[v]"
         )
     else:
         vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
               f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color={vid['pad_color']},"
-              f"setsar=1,fps={fps},{subs}")
+              f"setsar=1,fps={fps}{subs}")
         graph = None
-
-    # Head/tail trim, for cutting a standard intro sting or an end card off
-    # every clip. Guarded so a trim longer than the clip cannot produce an
-    # empty segment; in that case the trim is dropped and the clip kept whole.
-    trim_start = max(0.0, float(item.get("trim_start") or 0))
-    trim_end = max(0.0, float(item.get("trim_end") or 0))
-    source_duration = float(info["duration"])
-    usable = source_duration - trim_start - trim_end
-    if source_duration > 0 and usable < 0.30:
-        trim_start, trim_end = 0.0, 0.0
-        usable = source_duration
-
-    # Trim each segment to a whole number of frames and pad the audio to match.
-    # Without this the AAC tail runs a few ms past the last video frame, and the
-    # concat demuxer turns every one of those into a visible hitch at the join.
-    target_frames = max(1, math.floor(usable * fps))
-    target_duration = target_frames / float(fps)
 
     af_chain = []
     if aud.get("loudnorm"):
@@ -792,7 +777,7 @@ def render_clip(item, cfg, work_dir):
     af_chain.append("apad")
     af = ",".join(af_chain)
 
-    tmp_out = out.with_name(out.stem + ".tmp.mp4")
+    tmp_out = Path(out).with_name(Path(out).stem + ".tmp.mp4")
     cmd = ["ffmpeg", "-y", "-hide_banner", "-nostdin", "-loglevel", "error",
            "-fflags", "+genpts"]
     if trim_start > 0:
@@ -801,42 +786,216 @@ def render_clip(item, cfg, work_dir):
         cmd += ["-ss", f"{trim_start:.3f}"]
     cmd += ["-i", str(src)]
 
-    if info["has_audio"]:
-        audio_map = "0:a:0"
+    if video_only:
+        if graph:
+            cmd += ["-filter_complex", graph, "-map", "[v]"]
+        else:
+            cmd += ["-map", "0:v:0", "-vf", vf]
+        cmd += ["-an"]
     else:
-        cmd += ["-f", "lavfi", "-i",
-                f"anullsrc=channel_layout=stereo:sample_rate={int(aud['sample_rate'])}"]
-        audio_map = "1:a:0"
+        if info["has_audio"]:
+            audio_map = "0:a:0"
+        else:
+            cmd += ["-f", "lavfi", "-i",
+                    f"anullsrc=channel_layout=stereo:sample_rate={int(aud['sample_rate'])}"]
+            audio_map = "1:a:0"
+        if graph:
+            # With a filter_complex the audio goes through the same graph rather
+            # than -af, which would otherwise fight it for the output stream.
+            cmd += ["-filter_complex", f"{graph};[{audio_map}]{af}[a]",
+                    "-map", "[v]", "-map", "[a]"]
+        else:
+            cmd += ["-map", "0:v:0", "-map", audio_map, "-vf", vf, "-af", af]
+        cmd += ["-c:a", "aac", "-b:a", str(aud["bitrate"]),
+                "-ar", str(int(aud["sample_rate"])), "-ac", "2"]
 
-    if graph:
-        # With a filter_complex the audio goes through the same graph rather
-        # than -af, which would otherwise fight it for the output stream.
-        cmd += ["-filter_complex", f"{graph};[{audio_map}]{af}[a]",
-                "-map", "[v]", "-map", "[a]"]
-    else:
-        cmd += ["-map", "0:v:0", "-map", audio_map, "-vf", vf, "-af", af]
-
+    # The x264 settings must be identical for every pass: a label "head" is
+    # stream-copied in front of a cached "body", which only joins cleanly when
+    # both halves share the same codec parameters and a fixed keyframe grid.
     cmd += [
         "-c:v", "libx264", "-preset", str(vid["preset"]), "-crf", str(vid["crf"]),
         "-pix_fmt", "yuv420p", "-profile:v", "high",
         "-x264-params", f"keyint={gop}:min-keyint={gop}:scenecut=0",
-        "-c:a", "aac", "-b:a", str(aud["bitrate"]),
-        "-ar", str(int(aud["sample_rate"])), "-ac", "2",
         "-video_track_timescale", "90000",
         "-max_muxing_queue_size", "2048",
-        "-t", f"{target_duration:.6f}",
     ]
+    if frames:
+        cmd += ["-frames:v", str(int(frames))]
+    if duration:
+        cmd += ["-t", f"{duration:.6f}"]
     cmd += ["-f", "mp4", str(tmp_out)]
 
     run(cmd, quiet=True)
     os.replace(tmp_out, out)
+
+
+# ------------------------------------------------------------ fast builds
+#
+# Every compilation used to re-encode every clip in full, although the only
+# thing that differs between two compilations is the "Story N" label in the
+# first few seconds. So each clip is now encoded once without a label (the
+# "body", cached across builds), and a build only encodes a short labeled
+# "head" and stream-copies the rest of the body behind it. Same encoder, same
+# settings, same source: the output is identical in quality, and a build does
+# roughly a twentieth of the encoding work.
+
+BODY_VERSION = "1"
+
+
+def cache_dir(cfg, work_dir=None):
+    configured = (cfg.get("build") or {}).get("cache_dir")
+    if configured:
+        return Path(configured)
+    base = Path(work_dir).parent if work_dir else Path(tempfile.gettempdir())
+    return base / "cache" / "bodies"
+
+
+def body_fingerprint(item, cfg):
+    src = Path(item["path"])
+    try:
+        stat = src.stat()
+        identity = f"{src.name}:{stat.st_size}:{int(stat.st_mtime)}"
+    except OSError:
+        identity = src.name
+    payload = json.dumps({
+        "v": f"{RECIPE_VERSION}.{BODY_VERSION}",
+        "id": identity,
+        "trim": [float(item.get("trim_start") or 0), float(item.get("trim_end") or 0)],
+        "video": cfg["video"],
+        "audio": cfg["audio"],
+    }, sort_keys=True)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def prepare_body(item, cfg, bodies_dir):
+    """Encode (or reuse) the unlabeled full clip. Returns (path, info, cached)."""
+    src = Path(item["path"])
+    bodies_dir = Path(bodies_dir)
+    bodies_dir.mkdir(parents=True, exist_ok=True)
+    out = bodies_dir / f"{body_fingerprint(item, cfg)}.mp4"
+    info = probe(src)
+    if out.is_file() and out.stat().st_size > 1024:
+        try:
+            os.utime(out)  # mark as recently used for the cache pruner
+        except OSError:
+            pass
+        return out, info, True
+    if not info["has_video"]:
+        raise RuntimeError(f"{src.name} has no video stream")
+    fps = int(cfg["video"]["fps"])
+    trim_start, _, _, target_duration = _trim_window(item, info, fps)
+    _encode(src, info, cfg, out, trim_start=trim_start, duration=target_duration)
+    return out, info, False
+
+
+def head_seconds(cfg):
+    """Length of the labeled head: the label's end, rounded up to a keyframe.
+
+    None means the fast path does not apply (a label that never ends).
+    """
+    duration = float(cfg["label"].get("duration") or 0)
+    if duration <= 0:
+        return None
+    gop_s = 2.0  # keyint is fps * 2 frames, see _encode
+    return gop_s * math.ceil((duration + 0.001) / gop_s)
+
+
+def prune_cache(bodies_dir, max_gb):
+    """Delete the least recently used bodies until the cache fits max_gb."""
+    bodies_dir = Path(bodies_dir)
+    if not bodies_dir.is_dir() or not max_gb:
+        return 0
+    files = sorted(bodies_dir.glob("*.mp4"), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files)
+    limit = float(max_gb) * 1e9
+    removed = 0
+    for f in files:
+        if total <= limit:
+            break
+        size = f.stat().st_size
+        try:
+            f.unlink()
+            total -= size
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def _concat_quote(path):
+    return str(path).replace("'", "'\\''")
+
+
+def render_clip(item, cfg, work_dir):
+    """Normalize + label one clip into an MP4 part. Cached."""
+    src = item["path"]
+    label_text = render_label_text(item, cfg)
+    digest = recipe_fingerprint(item, cfg, label_text)
+    parts_dir = Path(work_dir) / "parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    out = parts_dir / f"{item['index']:04d}_{digest}.mp4"
+    meta_path = out.with_suffix(".json")
+
+    if out.is_file() and meta_path.is_file() and out.stat().st_size > 1024:
+        try:
+            cached = json.loads(meta_path.read_text(encoding="utf-8"))
+            if cached.get("duration", 0) > 0:
+                cached["cached"] = True
+                return cached
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    fps = int(cfg["video"]["fps"])
+    ass_path = parts_dir / f"{item['index']:04d}_{digest}.ass"
+    build_ass(label_text, cfg, ass_path)
+
+    head_s = head_seconds(cfg) if (cfg.get("build") or {}).get("fast", True) else None
+    mode = "full"
+    info = None
+    if head_s:
+        info = probe(src)
+        if not info["has_video"]:
+            raise RuntimeError(f"{Path(src).name} has no video stream")
+        trim_start, trim_end, target_frames, target_duration = _trim_window(item, info, fps)
+        head_frames = int(round(head_s * fps))
+        # Only worth it when there is a real body left after the head.
+        if target_frames > head_frames + fps:
+            body, info, body_cached = prepare_body(item, cfg, cache_dir(cfg, work_dir))
+            head = parts_dir / f"{item['index']:04d}_{digest}.head.mp4"
+            _encode(src, info, cfg, head, ass_path=ass_path, trim_start=trim_start,
+                    frames=head_frames, video_only=True)
+            listing = parts_dir / f"{item['index']:04d}_{digest}.concat.txt"
+            listing.write_text(f"file '{_concat_quote(Path(head).resolve())}'\n"
+                               f"file '{_concat_quote(Path(body).resolve())}'\n"
+                               f"inpoint {head_s:.6f}\n", encoding="utf-8")
+            tmp_out = out.with_name(out.stem + ".tmp.mp4")
+            run(["ffmpeg", "-y", "-hide_banner", "-nostdin", "-loglevel", "error",
+                 "-f", "concat", "-safe", "0", "-i", str(listing),
+                 "-i", str(body), "-map", "0:v:0", "-map", "1:a:0", "-c", "copy",
+                 "-t", f"{target_duration:.6f}", "-video_track_timescale", "90000",
+                 "-f", "mp4", str(tmp_out)], quiet=True)
+            os.replace(tmp_out, out)
+            for f in (head, listing):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+            mode = "fast (body reused)" if body_cached else "fast (body encoded)"
+
+    if mode == "full":
+        info = info or probe(src)
+        if not info["has_video"]:
+            raise RuntimeError(f"{Path(src).name} has no video stream")
+        trim_start, trim_end, target_frames, target_duration = _trim_window(item, info, fps)
+        _encode(src, info, cfg, out, ass_path=ass_path, trim_start=trim_start,
+                duration=target_duration)
 
     rendered = probe(out)
     meta = {
         "index": item["index"],
         "n": item["n"],
         "source": str(src),
-        "source_name": src.name,
+        "source_name": Path(src).name,
         "label": label_text,
         "title": item.get("title") or "",
         "part": str(out),
@@ -848,6 +1007,7 @@ def render_clip(item, cfg, work_dir):
         "source_fps": info["fps"],
         "had_audio": info["has_audio"],
         "cached": False,
+        "mode": mode,
     }
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return meta

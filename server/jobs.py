@@ -36,7 +36,8 @@ def configure(data_dir):
     _paths["thumbs"] = data_dir / "thumbs"
     _paths["work"] = data_dir / "work"
     _paths["out"] = data_dir / "output"
-    for key in ("downloads", "thumbs", "work", "out"):
+    _paths["cache"] = data_dir / "cache" / "bodies"
+    for key in ("downloads", "thumbs", "work", "out", "cache"):
         _paths[key].mkdir(parents=True, exist_ok=True)
 
 
@@ -226,7 +227,15 @@ def build_config(body, safe_name, out_dir=None):
         "video": {k: v for k, v in video.items() if v is not None},
         "audio": {k: v for k, v in audio.items() if v is not None},
         "build": {"jobs": int(body.get("jobs") or 0) or (os.cpu_count() or 2),
-                  "keep_intermediates": True},
+                  "keep_intermediates": True,
+                  # Fast builds: each clip is encoded once without a label and
+                  # cached; a build only re-encodes the labeled first seconds.
+                  "fast": body.get("fast", True) is not False,
+                  "cache_dir": str(paths()["cache"]),
+                  # A test build never counts towards "used".
+                  "test": bool(body.get("test")),
+                  # Clips that may stand in for any clip that fails to download.
+                  "spares": [str(v) for v in (body.get("spares") or [])][:200]},
         "trim": body.get("trim") or {},
         "output": {"path": out_path, "write_chapters": True,
                    "write_manifest": True, "embed_chapters": True,
@@ -320,7 +329,7 @@ def _channel_output(output, channel_name, channel_slug, many):
     return out
 
 
-def run_recipe(recipe_id, *, manual=False):
+def run_recipe(recipe_id, *, manual=False, test=False):
     """Turn a recipe into one queued build per channel it targets."""
     recipe = db.one("SELECT * FROM recipes WHERE id = ?", (recipe_id,))
     if not recipe:
@@ -353,9 +362,15 @@ def run_recipe(recipe_id, *, manual=False):
                                                       rules.slug(channel_name),
                                                       many)},
                            slugify(name))
+        cfg["build"]["test"] = bool(test)
         cfg["trim"] = {"start": float(rule_dict.get("trim_start") or 0),
                        "end": float(rule_dict.get("trim_end") or 0)}
+        chosen = {c["id"] for c in clips}
+        pool = rules.filter_clips(channel_clips(channel_id), rule_dict)
+        pool.sort(key=lambda c: -(c.get("view_count") or 0))
+        cfg["build"]["spares"] = [c["id"] for c in pool if c["id"] not in chosen][:200]
         titles = {c["id"]: (c.get("title") or "") for c in clips}
+        titles.update({c["id"]: (c.get("title") or "") for c in pool[:400]})
         build_id = create_build(name, [c["id"] for c in clips], cfg,
                                 titles=titles, recipe_id=recipe_id)
         db.execute("UPDATE builds SET channel_id = ? WHERE id = ?",
@@ -518,6 +533,63 @@ def _run_build(build_id):
                        (str(exc)[:300], build_id, row["position"]))
         _progress(build_id, done=i)
 
+    # A failed download is usually a passing proxy or YouTube hiccup, so every
+    # failed clip gets one more attempt at the end of the stage. If it still
+    # fails and the build has spares, a spare takes its place, so a 250 clip
+    # build still comes out with 250 clips.
+    failed_rows = [row for row in items_rows
+                   if row["video_id"] in {f[0] for f in failures}]
+    if failed_rows and not _cancelled(build_id):
+        spares = [v for v in (cfg["build"].get("spares") or [])
+                  if v not in {r["video_id"] for r in items_rows}]
+        still_failed = []
+        for row in failed_rows:
+            _progress(build_id, message=f"retrying {(row['video_title'] or '')[:40]}")
+            try:
+                path = providers.download(row["video_id"], downloads)
+                db.execute("UPDATE videos SET local_path = ? WHERE id = ?",
+                           (str(path), row["video_id"]))
+                ready.append((row, path))
+                failures = [f for f in failures if f[0] != row["video_id"]]
+                db.execute("UPDATE build_items SET status='ready', note=NULL "
+                           "WHERE build_id=? AND position=?",
+                           (build_id, row["position"]))
+                continue
+            except Exception:  # noqa: BLE001
+                pass
+            replaced = False
+            while spares and not replaced:
+                spare_id = spares.pop(0)
+                spare = db.one("SELECT id, title, local_path FROM videos WHERE id = ?",
+                               (spare_id,))
+                if not spare:
+                    continue
+                try:
+                    if spare.get("local_path") and Path(spare["local_path"]).is_file():
+                        path = Path(spare["local_path"])
+                    else:
+                        _progress(build_id, message=f"replacing with "
+                                                    f"{(spare['title'] or '')[:40]}")
+                        path = providers.download(spare_id, downloads)
+                        db.execute("UPDATE videos SET local_path = ? WHERE id = ?",
+                                   (str(path), spare_id))
+                except Exception:  # noqa: BLE001
+                    continue
+                old_title = row["video_title"] or row["video_id"]
+                new_row = dict(row, video_id=spare_id, vid=spare_id,
+                               video_title=spare["title"], title=spare["title"] or "")
+                ready.append((new_row, path))
+                failures = [f for f in failures if f[0] != row["video_id"]]
+                db.execute("UPDATE build_items SET video_id=?, title=?, status='ready', "
+                           "note=? WHERE build_id=? AND position=?",
+                           (spare_id, spare["title"] or "",
+                            f"replaced \"{old_title[:60]}\" (could not download)",
+                            build_id, row["position"]))
+                replaced = True
+            if not replaced:
+                still_failed.append(row)
+        ready.sort(key=lambda rp: rp[0]["position"])
+
     if not ready:
         db.execute("UPDATE builds SET status='failed', error=?, finished_at=? "
                    "WHERE id = ?",
@@ -573,8 +645,12 @@ def _run_build(build_id):
                 db.execute("UPDATE build_items SET status='failed', note=? "
                            "WHERE build_id=? AND position=?",
                            (str(exc)[:300], build_id, item["position"]))
+            fast_note = ""
+            if metas and str(metas[-1].get("mode", "")).startswith("fast"):
+                reused = sum(1 for m in metas if m.get("mode") == "fast (body reused)")
+                fast_note = f" (fast: {reused} clip(s) reused from cache)"
             _progress(build_id, done=done,
-                      message=f"encoded {done}/{total}")
+                      message=f"encoded {done}/{total}{fast_note}")
 
     if not metas:
         db.execute("UPDATE builds SET status='failed', error=?, finished_at=? "
@@ -594,7 +670,12 @@ def _run_build(build_id):
     engine.write_chapter_text(metas, out_path.with_suffix(".chapters.txt"))
     engine.write_manifest(metas, out_path.with_suffix(".manifest.csv"))
 
-    db.mark_used([m["video_id"] for m in metas if m.get("video_id")])
+    if not cfg["build"].get("test"):
+        db.mark_used([m["video_id"] for m in metas if m.get("video_id")])
+    try:
+        engine.prune_cache(paths()["cache"], float(db.get_setting("body_cache_gb") or 60))
+    except Exception:  # noqa: BLE001 - housekeeping must never fail a build
+        pass
 
     total_seconds = sum(float(m["duration"]) for m in metas)
     note = "done"
@@ -628,3 +709,59 @@ def _fill_rate(t0, done, total):
     r = f"{rate:.0f}/s" if rate >= 1 else f"{rate * 60:.1f}/min"
     eta = f"{left:.0f}s" if left < 90 else f"{left / 60:.0f} min"
     return f" · {r} · ~{eta} left · {secs:.0f}s elapsed"
+
+
+# ------------------------------------------------------------ prepare step
+#
+# Before a build: check every picked clip is on disk, download the missing
+# ones several at a time, and report each clip's state so the dashboard can
+# show ready / downloading / failed (with the reason) per clip. The build then
+# only has to encode.
+
+_prepare = {}          # video_id -> {"state": ..., "error": ...}
+_prepare_lock = threading.Lock()
+
+
+def clip_status(video_ids):
+    rows = {r["id"]: r for r in db.query(
+        f"SELECT id, title, duration, view_count, local_path, thumb FROM videos "
+        f"WHERE id IN ({','.join('?' * len(video_ids))})", tuple(video_ids))} if video_ids else {}
+    out = []
+    for vid in video_ids:
+        row = rows.get(vid) or {"id": vid, "title": vid}
+        on_disk = bool(row.get("local_path") and Path(row["local_path"]).is_file())
+        with _prepare_lock:
+            job = dict(_prepare.get(vid) or {})
+        state = "ready" if on_disk else (job.get("state") or "missing")
+        out.append({"id": vid, "title": row.get("title"), "duration": row.get("duration"),
+                    "views": row.get("view_count"), "state": state,
+                    "error": job.get("error") if state == "failed" else None})
+    return out
+
+
+def prepare_clips(video_ids, workers=3):
+    """Download every missing clip in the background, several at a time."""
+    todo = [c["id"] for c in clip_status(video_ids) if c["state"] in ("missing", "failed")]
+    with _prepare_lock:
+        for vid in todo:
+            _prepare[vid] = {"state": "queued"}
+
+    def one(vid):
+        with _prepare_lock:
+            _prepare[vid] = {"state": "downloading"}
+        try:
+            path = providers.download(vid, paths()["downloads"])
+            db.execute("UPDATE videos SET local_path = ? WHERE id = ?", (str(path), vid))
+            with _prepare_lock:
+                _prepare[vid] = {"state": "ready"}
+        except Exception as exc:  # noqa: BLE001
+            with _prepare_lock:
+                _prepare[vid] = {"state": "failed", "error": str(exc)[:300]}
+
+    def run_all():
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, 6))) as pool:
+            list(pool.map(one, todo))
+
+    if todo:
+        threading.Thread(target=run_all, name="prepare", daemon=True).start()
+    return len(todo)

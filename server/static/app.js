@@ -86,7 +86,9 @@ async function loadVideos() {
   const p = new URLSearchParams({
     channel: state.channel, q: $('q').value.trim(), month: $('month').value,
     shorts: $('shorts').value, sort: $('sort').value,
-    unused: $('unused').checked ? '1' : '', limit: '600',
+    unused: $('unused').checked ? '1' : '', limit: '2000',
+    min_views: $('minViews').value, date_from: $('dateFrom').value,
+    date_to: $('dateTo').value,
   });
   const data = await api('/api/videos?' + p);
   state.videos = data.videos;
@@ -174,6 +176,8 @@ function renderTray() {
   $('sum').textContent = state.picked.length
     ? `${state.picked.length} clips, ${hms(total)}` : 'nothing picked';
   $('build').disabled = state.picked.length === 0;
+  $('previewBtn').disabled = state.picked.length === 0;
+  $('checkBtn').disabled = state.picked.length === 0;
 
   const head = parseFloat($('trimHead').value) || 0;
   const tail = parseFloat($('trimTail').value) || 0;
@@ -278,6 +282,7 @@ $('build').addEventListener('click', async () => {
         trim: { start: parseFloat($('trimHead').value) || 0,
                 end: parseFloat($('trimTail').value) || 0 },
         trims: state.trims,
+        test: $('testBuild').checked,
       }),
     });
     openBuild(res.id);
@@ -317,6 +322,7 @@ async function openBuild(id) {
       return `<div class="stage ${cls}">${s}</div>`;
     }).join('');
     const failed = (b.items || []).filter(it => it.status === 'failed');
+    const replaced = (b.items || []).filter(it => it.status !== 'failed' && (it.note || '').startsWith('replaced'));
     let foot = '';
     if (b.status === 'done') {
       foot = `<div class="note">Finished in ${hms((b.finished_at - b.started_at) || 0)}.
@@ -336,6 +342,10 @@ async function openBuild(id) {
     if (failed.length) {
       foot += `<div class="warnbox">${failed.length} clip(s) skipped:<br>` +
         failed.slice(0, 5).map(f => esc(f.video_title || f.video_id) + (skipWhy(b, f) ? ' <span style="opacity:.75">— ' + esc(skipWhy(b, f)) + '</span>' : '')).join('<br>') + '</div>';
+    }
+    if (replaced.length) {
+      foot += `<div class="note" style="margin-top:10px">${replaced.length} clip(s) swapped in automatically:<br>` +
+        replaced.slice(0, 8).map(r => `Story ${r.position + 1}: ${esc(r.video_title || r.video_id)} <span style="opacity:.7">(${esc(r.note)})</span>`).join('<br>') + '</div>';
     }
     $('bbody').innerHTML = `<b>${esc(b.name)}</b>
       <div class="stages">${stages}</div>
@@ -429,7 +439,7 @@ $('sync').addEventListener('click', () => {
 $('chan').addEventListener('change', e => {
   state.channel = e.target.value; loadVideos();
 });
-['month', 'shorts', 'sort'].forEach(id =>
+['month', 'shorts', 'sort', 'minViews', 'dateFrom', 'dateTo'].forEach(id =>
   $(id).addEventListener('change', loadVideos));
 $('unused').addEventListener('change', loadVideos);
 $('tpl').addEventListener('input', updatePreview);
@@ -451,6 +461,8 @@ $('clearSel').addEventListener('click', () => {
 });
 
 window.closeModal = closeModal;
+window.loadVideos = loadVideos; window.state = state; window.api = api; window.render = render; window.renderTray = renderTray;
+window.modal = modal; window.toast = toast; window.esc = esc; window.hms = hms; window.views = views;
 window.openBuild = openBuild;
 window.cancelBuild = cancelBuild;
 window.doAddChannel = doAddChannel;
@@ -673,6 +685,7 @@ function renderEditor() {
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
         <button class="btn primary" id="rSave">${c.id ? 'Save recipe' : 'Create recipe'}</button>
         <button class="btn" id="rRun"${c.id ? '' : ' disabled'}>Build it now</button>
+        <button class="btn" id="rTest"${c.id ? '' : ' disabled'} title="Builds it without counting any clip as used">Test build</button>
         <button class="btn ghost" id="rNewFromHere">New recipe</button>
         ${c.id ? '<div class="spacer"></div><button class="btn ghost" id="rDel">Delete</button>' : ''}
       </div>
@@ -689,7 +702,8 @@ function renderEditor() {
   document.querySelectorAll('.rch').forEach(el =>
     el.addEventListener('change', collectAndPreview));
   $('rSave').addEventListener('click', saveRecipe);
-  $('rRun').addEventListener('click', runRecipe);
+  $('rRun').addEventListener('click', () => runRecipe(false));
+  $('rTest').addEventListener('click', () => runRecipe(true));
   $('rNewFromHere').addEventListener('click', newRecipe);
   if ($('rDel')) $('rDel').addEventListener('click', deleteRecipe);
   collectAndPreview();
@@ -797,11 +811,11 @@ async function saveRecipe() {
   } catch (err) { toast('Could not save: ' + err.message); }
 }
 
-async function runRecipe() {
+async function runRecipe(test) {
   const c = rState.current;
   if (!c || !c.id) return;
   try {
-    const res = await api(`/api/recipes/${c.id}/run`, { method: 'POST' });
+    const res = await api(`/api/recipes/${c.id}/run${test === true ? '?test=1' : ''}`, { method: 'POST' });
     const n = (res.builds || []).length;
     if (n > 1) toast(`Started ${n} compilations, one per channel`);
     showView('Library');
@@ -982,6 +996,8 @@ async function openSettings() {
 
       <div class="btnrow" style="display:flex;gap:8px;margin-top:16px">
         <button class="btn primary" id="saveKey">Save settings</button>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="resetUsed" title="Sets every clip back to never used">Reset used counts</button>
       </div>
     </div>`);
 
