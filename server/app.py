@@ -187,7 +187,8 @@ def delete_channel(channel_id: str):
 @app.get("/api/videos")
 def list_videos(channel: str = "", q: str = "", month: str = "",
                 shorts: str = "", unused: str = "", sort: str = "date_desc",
-                limit: int = 500, offset: int = 0):
+                limit: int = 500, offset: int = 0, min_views: int = 0,
+                date_from: str = "", date_to: str = ""):
     where, params = ["1=1"], []
     if channel:
         where.append("channel_id = ?"); params.append(channel)
@@ -201,6 +202,12 @@ def list_videos(channel: str = "", q: str = "", month: str = "",
         where.append("is_short = 0")
     if unused == "1":
         where.append("used_count = 0")
+    if min_views:
+        where.append("view_count >= ?"); params.append(int(min_views))
+    if date_from:
+        where.append("upload_date >= ?"); params.append(date_from[:10])
+    if date_to:
+        where.append("upload_date <= ?"); params.append(date_to[:10])
 
     order = {
         "date_desc": "upload_date DESC, title ASC",
@@ -231,6 +238,54 @@ def list_videos(channel: str = "", q: str = "", month: str = "",
             "unknown": agg["unknown"] or 0,
             "library": {"count": lib["n"], "runtime": lib["secs"]} if lib else None,
             "months": [m["month"] for m in months if m["month"]]}
+
+
+@app.post("/api/videos/reset-used")
+def reset_used():
+    """Clear every "used" count, e.g. after a round of test builds."""
+    cur = db.execute("UPDATE videos SET used_count = 0, last_used_at = NULL "
+                     "WHERE used_count > 0")
+    return {"reset": cur.rowcount}
+
+
+@app.get("/api/videos/{video_id}/media")
+def video_media(video_id: str, request: Request):
+    """Stream a downloaded clip to the browser, with seeking (HTTP ranges)."""
+    row = db.one("SELECT local_path FROM videos WHERE id = ?", (video_id,))
+    path = Path(row["local_path"]) if row and row.get("local_path") else None
+    if not path or not path.is_file():
+        raise HTTPException(404, "not downloaded yet")
+    size = path.stat().st_size
+    media = "video/webm" if path.suffix.lower() == ".webm" else "video/mp4"
+    rng = request.headers.get("range", "")
+    if not rng.startswith("bytes="):
+        return FileResponse(path, media_type=media, headers={"Accept-Ranges": "bytes"})
+    start_s, _, end_s = rng[6:].split(",")[0].partition("-")
+    try:
+        if start_s:
+            start = int(start_s)
+            end = min(int(end_s), size - 1) if end_s else size - 1
+        else:
+            start, end = max(0, size - int(end_s)), size - 1
+    except ValueError:
+        raise HTTPException(416, "bad range")
+    if start >= size or start > end:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    end = min(end, start + 8 * 1024 * 1024 - 1)   # at most 8 MB per request
+    with path.open("rb") as fh:
+        fh.seek(start)
+        data = fh.read(end - start + 1)
+    return Response(data, status_code=206, media_type=media, headers={
+        "Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes",
+        "Content-Length": str(len(data))})
+
+
+@app.post("/api/prepare")
+async def prepare_status(request: Request):
+    body = await request.json()
+    ids = [str(v) for v in (body.get("video_ids") or [])][:2000]
+    started = jobs.prepare_clips(ids) if body.get("download") else 0
+    return {"clips": jobs.clip_status(ids), "started": started}
 
 
 @app.get("/thumbs/{name}")
@@ -363,9 +418,9 @@ def delete_recipe(recipe_id: int):
 
 
 @app.post("/api/recipes/{recipe_id}/run")
-def run_recipe_now(recipe_id: int):
+def run_recipe_now(recipe_id: int, test: int = 0):
     try:
-        built = jobs.run_recipe(recipe_id, manual=True)
+        built = jobs.run_recipe(recipe_id, manual=True, test=bool(test))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"builds": built, "build_id": built[0]["build_id"]}

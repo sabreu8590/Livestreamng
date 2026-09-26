@@ -15,6 +15,21 @@ Every idea Steven has raised, so nothing gets lost. Status: DONE / NEXT / PLANNE
 - DONE Download retries on new sticky IPs, plus a backup downloader
 - DONE Skip reasons saved per clip (the dashboard display still needs checking)
 
+## Built in the dashboard update (deploy_dashboard_update.sh)
+- BUILT Fast builds: each clip encoded once without a label (cached in data/cache/bodies, 60 GB cap,
+  least-recently-used pruned); builds encode only the labeled first ~6 s. Verified identical output
+  (PSNR 70+ dB, same frame and sample counts). Measured 66 s -> 14 s on repeat builds of test clips
+- BUILT Nightly pre-encode of the top 300 clips (prefetch.py --encode), so even first builds are fast
+- BUILT Preview: plays the picked clips back to back in the browser with the STORY label overlaid,
+  skim mode, speed, remove clips, no encoding needed
+- BUILT Check clips: per-clip ready / downloading / failed (with reason), Download missing
+  (3 at a time), Remove failed
+- BUILT Failed downloads are retried once at the end, then replaced by a spare clip matching the same
+  recipe rules (recipes pass their qualifying pool as spares); the build dialog lists the swaps
+- BUILT Test builds (checkbox + recipe "Test build") never count as used; Settings -> Reset used counts
+- BUILT Library filters: min views (500K ... 10M+) and a from/to date range; "Add all shown" mass-selects
+- BUILT Smart shuffle with "keep first N fixed" (Top 10 / Top 25 stays on top, the rest paced)
+
 ## Next
 - READY Overnight pre-downloader (prefetch.py + install_prefetch.sh): parallel, a sticky IP per worker, highest views first,
   nightly GB budget, disk guard, status file. Dashboard page for it: PLANNED once the code is on GitHub

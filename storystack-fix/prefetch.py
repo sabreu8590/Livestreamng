@@ -82,6 +82,51 @@ def show_status():
         print(f"  failed: {e['title'][:50]} -- {e['error'][:120]}")
 
 
+def encode_bodies(a, st):
+    """Pre-encode the unlabeled clip bodies so the next builds only encode labels.
+
+    Uses the shape and fill of the most recent build, so the cache matches the
+    compilations actually being made. Clips already in the cache are skipped.
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(SERVER), "bin"))
+    import storystack as engine
+    from concurrent.futures import ThreadPoolExecutor as Pool
+    c = sqlite3.connect(DB, timeout=30)
+    row = c.execute("SELECT config_json FROM builds ORDER BY id DESC LIMIT 1").fetchone()
+    cfg = engine.apply_aspect(engine.deep_merge(engine.DEFAULT_CONFIG,
+                                                json.loads(row[0]) if row and row[0] else {}))
+    bodies = os.path.join(os.path.dirname(DB), "cache", "bodies")
+    os.makedirs(bodies, exist_ok=True)
+    q = ("SELECT id, title, local_path FROM videos WHERE COALESCE(view_count, 0) >= ? "
+         "AND duration > 0 AND duration <= ? AND local_path IS NOT NULL AND local_path != '' "
+         "ORDER BY view_count DESC LIMIT ?")
+    todo = [(vid, t, lp) for vid, t, lp in c.execute(q, (a.min_views, a.max_seconds, a.encode))
+            if os.path.exists(lp)]
+    t0, done, fresh = time.time(), 0, 0
+    st["encode"] = {"total": len(todo), "done": 0, "new": 0}
+    print(f"pre-encoding up to {len(todo)} clips for fast builds "
+          f"({cfg['video']['width']}x{cfg['video']['height']}, {cfg['video'].get('fill')})",
+          flush=True)
+
+    def one(args):
+        vid, title, lp = args
+        item = {"path": engine.Path(lp), "trim_start": 0, "trim_end": 0}
+        _, _, cached = engine.prepare_body(item, cfg, bodies)
+        return title, cached
+
+    with Pool(max(1, a.encode_workers)) as ex:
+        for title, cached in ex.map(one, todo):
+            done += 1
+            fresh += 0 if cached else 1
+            st["encode"].update(done=done, new=fresh)
+            if not cached:
+                print(f"  encoded {title[:60]}", flush=True)
+            if done % 10 == 0:
+                write_status(st)
+    print(f"pre-encode done: {fresh} new, {done - fresh} already cached, "
+          f"{(time.time() - t0) / 60:.1f} min", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-views", type=int, default=1_000_000)
@@ -93,6 +138,9 @@ def main():
     ap.add_argument("--min-free-gb", type=float, default=40.0, help="stop if disk gets this full")
     ap.add_argument("--usd-per-gb", type=float, default=1.0)
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--encode", type=int, default=0, metavar="N",
+                    help="after downloading, pre-encode the top N clips for fast builds")
+    ap.add_argument("--encode-workers", type=int, default=4)
     a = ap.parse_args()
     if a.status:
         return show_status()
@@ -112,6 +160,8 @@ def main():
     write_status(st)
     print(f"prefetch: {len(todo)} clips to download (>= {a.min_views:,} views)", flush=True)
     if not todo:
+        if a.encode:
+            encode_bodies(a, st)
         st["state"] = "done"; write_status(st); return
 
     c = sqlite3.connect(DB, timeout=30)
@@ -157,6 +207,8 @@ def main():
             if stop:
                 st["stopped_because"] = stop
             write_status(st)
+    if a.encode:
+        encode_bodies(a, st)
     st["state"] = "done" if not stop else "paused"
     st["finished"] = time.time()
     write_status(st)

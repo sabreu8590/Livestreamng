@@ -27,6 +27,7 @@ __pycache__/
 *.log
 cookies.txt
 *.env
+backup-*/
 GI
 git add -A
 git -c user.name="StoryStack VPS" -c user.email="storystack-vps@users.noreply.github.com" \
