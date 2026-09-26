@@ -1,0 +1,10 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.bak*
+*.db
+*.sqlite*
+*.log
+cookies.txt
+*.env
